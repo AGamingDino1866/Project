@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -53,6 +54,13 @@ fun MarkupCanvas(
     var shapeStart by remember { mutableStateOf<Offset?>(null) }
     var shapeEnd by remember { mutableStateOf<Offset?>(null) }
 
+    // The gesture coroutine below only restarts when markupMode/activeDrawTool
+    // change (see pointerInput keys). Everything else read inside it (color,
+    // stroke width, opacity, elements...) must come through this so it always
+    // sees the latest value instead of whatever was captured when the
+    // coroutine last (re)launched.
+    val latestState = rememberUpdatedState(state)
+
     val gestureModifier = if (state.markupMode == MarkupMode.TEXT) {
         Modifier.pointerInput(state.markupMode) {
             detectTapGestures { pos -> onTextPlace(metrics.toNormalized(pos)) }
@@ -62,14 +70,15 @@ fun MarkupCanvas(
             detectDragGestures(
                 onDragStart = { pos ->
                     onBeginStroke()
+                    val current = latestState.value
                     val norm = metrics.toNormalized(pos)
                     when {
-                        state.markupMode == MarkupMode.SHAPE -> {
+                        current.markupMode == MarkupMode.SHAPE -> {
                             shapeStart = norm
                             shapeEnd = norm
                         }
-                        state.activeDrawTool == DrawTool.ERASER -> {
-                            val hit = hitTestElements(state.elements, norm)
+                        current.activeDrawTool == DrawTool.ERASER -> {
+                            val hit = hitTestElements(current.elements, norm)
                             if (hit.isNotEmpty()) onElementsErased(hit)
                         }
                         else -> {
@@ -78,11 +87,12 @@ fun MarkupCanvas(
                     }
                 },
                 onDrag = { change, _ ->
+                    val current = latestState.value
                     val norm = metrics.toNormalized(change.position)
                     when {
-                        state.markupMode == MarkupMode.SHAPE -> shapeEnd = norm
-                        state.activeDrawTool == DrawTool.ERASER -> {
-                            val hit = hitTestElements(state.elements, norm)
+                        current.markupMode == MarkupMode.SHAPE -> shapeEnd = norm
+                        current.activeDrawTool == DrawTool.ERASER -> {
+                            val hit = hitTestElements(current.elements, norm)
                             if (hit.isNotEmpty()) onElementsErased(hit)
                         }
                         else -> inProgressPath = inProgressPath + norm
@@ -90,7 +100,7 @@ fun MarkupCanvas(
                 },
                 onDragEnd = {
                     finalizeStroke(
-                        state, inProgressPath, shapeStart, shapeEnd, onStrokeFinished
+                        latestState.value, inProgressPath, shapeStart, shapeEnd, onStrokeFinished
                     )
                     inProgressPath = emptyList()
                     shapeStart = null
