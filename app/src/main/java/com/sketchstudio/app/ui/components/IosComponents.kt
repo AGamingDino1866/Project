@@ -1,6 +1,5 @@
 package com.sketchstudio.app.ui.components
 
-import android.os.Build
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
@@ -23,7 +22,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -35,7 +33,14 @@ import com.sketchstudio.app.ui.theme.IosColors
 import com.sketchstudio.app.ui.theme.LocalIosPalette
 
 /**
- * A translucent, blurred surface that mimics iPadOS's UIVisualEffectView bars.
+ * A translucent surface that mimics iPadOS's UIVisualEffectView bars.
+ *
+ * Note: this only applies translucency, not a true backdrop blur — blurring
+ * only what's *behind* a panel (without blurring the panel's own content,
+ * like iOS's UIVisualEffectView) needs a separate captured background layer,
+ * which isn't worth the complexity here. An earlier version blurred this
+ * Box directly, which blurred its buttons/text/icons too — that was a bug,
+ * not a stylistic choice.
  */
 @Composable
 fun GlassSurface(
@@ -48,11 +53,6 @@ fun GlassSurface(
     Box(
         modifier = modifier
             .clip(shape)
-            .then(
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    Modifier.blur(20.dp)
-                } else Modifier
-            )
             .background(palette.elevatedSurface),
         content = content
     )
