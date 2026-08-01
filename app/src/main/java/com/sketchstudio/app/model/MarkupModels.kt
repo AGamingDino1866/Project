@@ -4,8 +4,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 
 enum class DrawTool {
-    PEN, MARKER, PENCIL, ERASER
+    PEN, MARKER, PENCIL, CRAYON, CALLIGRAPHY, ERASER
 }
+
+/** Brushes whose stroke width varies along its length rather than staying constant. */
+val VariableWidthTools = setOf(DrawTool.CRAYON, DrawTool.CALLIGRAPHY)
 
 enum class ShapeType {
     LINE, ARROW, RECTANGLE, OVAL

@@ -19,6 +19,7 @@ data class EditorUiState(
     val activeShapeType: ShapeType = ShapeType.RECTANGLE,
     val markupMode: MarkupMode = MarkupMode.DRAW,
     val currentColor: Color = Color(0xFFFF3B30),
+    val customColors: List<Color> = emptyList(),
     val currentStrokeWidthFraction: Float = 0.008f,
     val currentOpacity: Float = 1f,
     val isProcessing: Boolean = false,

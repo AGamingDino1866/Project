@@ -19,7 +19,9 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawStyle
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
@@ -50,6 +52,7 @@ fun MarkupCanvas(
     modifier: Modifier = Modifier
 ) {
     val textMeasurer = rememberTextMeasurer()
+    val haptics = LocalHapticFeedback.current
     var inProgressPath by remember { mutableStateOf<List<Offset>>(emptyList()) }
     var shapeStart by remember { mutableStateOf<Offset?>(null) }
     var shapeEnd by remember { mutableStateOf<Offset?>(null) }
@@ -70,6 +73,7 @@ fun MarkupCanvas(
             detectDragGestures(
                 onDragStart = { pos ->
                     onBeginStroke()
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     val current = latestState.value
                     val norm = metrics.toNormalized(pos)
                     when {
@@ -189,6 +193,7 @@ private fun finalizeStroke(
 private fun strokeAlphaFor(tool: DrawTool): Float = when (tool) {
     DrawTool.MARKER -> 0.45f
     DrawTool.PENCIL -> 0.85f
+    DrawTool.CRAYON -> 0.8f
     else -> 1f
 }
 
@@ -267,14 +272,15 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePath(
     tool: DrawTool
 ) {
     if (points.isEmpty()) return
-    val path = Path()
-    val first = metrics.toContainerLocal(points.first())
-    path.moveTo(first.x, first.y)
-    for (i in 1 until points.size) {
-        val p = metrics.toContainerLocal(points[i])
-        path.lineTo(p.x, p.y)
-    }
     val strokeWidthPx = (strokeWidthFraction * metrics.displayedSize.width).coerceAtLeast(1f)
+
+    if (tool in com.sketchstudio.app.model.VariableWidthTools) {
+        drawVariableWidthStroke(points, metrics, color, strokeWidthPx, alpha, tool)
+        return
+    }
+
+    val mapped = points.map { metrics.toContainerLocal(it) }
+    val path = smoothedPath(mapped)
     val cap = if (tool == DrawTool.MARKER) StrokeCap.Square else StrokeCap.Round
     drawPath(
         path = path,
@@ -283,6 +289,89 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePath(
         style = Stroke(width = strokeWidthPx, cap = cap, join = StrokeJoin.Round)
     )
 }
+
+/** Builds a smoothed path through midpoints (quadratic bezier), reducing the jagged look of raw finger-drag points. */
+private fun smoothedPath(mapped: List<Offset>): Path {
+    val path = Path()
+    if (mapped.isEmpty()) return path
+    path.moveTo(mapped.first().x, mapped.first().y)
+    if (mapped.size < 3) {
+        for (i in 1 until mapped.size) path.lineTo(mapped[i].x, mapped[i].y)
+        return path
+    }
+    for (i in 1 until mapped.size - 1) {
+        val curr = mapped[i]
+        val next = mapped[i + 1]
+        val midX = (curr.x + next.x) / 2f
+        val midY = (curr.y + next.y) / 2f
+        path.quadraticTo(curr.x, curr.y, midX, midY)
+    }
+    val last = mapped.last()
+    path.lineTo(last.x, last.y)
+    return path
+}
+
+/**
+ * Renders a stroke whose width varies along its length, used for the
+ * textured Crayon brush and the chisel-nib Calligraphy brush. Rendered as a
+ * sequence of per-segment lines rather than one continuous Path, since
+ * Compose can't vary a Stroke's width partway through a path. The width
+ * formula is purely deterministic (index/direction based, no randomness) so
+ * the exported bitmap matches this preview exactly.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawVariableWidthStroke(
+    points: List<Offset>,
+    metrics: ImageDisplayMetrics,
+    color: Color,
+    baseStrokeWidthPx: Float,
+    alpha: Float,
+    tool: DrawTool
+) {
+    if (points.size < 2) return
+    val mapped = points.map { metrics.toContainerLocal(it) }
+    for (i in 0 until mapped.size - 1) {
+        val a = mapped[i]
+        val b = mapped[i + 1]
+        val segWidth = variableSegmentWidth(tool, i, a, b, baseStrokeWidthPx)
+        drawLine(
+            color = color,
+            start = a,
+            end = b,
+            strokeWidth = segWidth,
+            cap = StrokeCap.Round,
+            alpha = alpha
+        )
+    }
+}
+
+/**
+ * Deterministic per-segment stroke width for the variable-width brushes.
+ * CRAYON: a gentle index-based wave for a slightly uneven, waxy line.
+ * CALLIGRAPHY: width follows this segment's direction relative to a fixed
+ * 45-degree nib angle, like a chisel-tip pen — thin when moving parallel to
+ * the nib edge, thick when moving across it.
+ */
+private fun variableSegmentWidth(
+    tool: DrawTool,
+    index: Int,
+    segmentStart: Offset,
+    segmentEnd: Offset,
+    baseWidthPx: Float
+): Float = when (tool) {
+    DrawTool.CRAYON -> {
+        val wave = 0.78f + 0.22f * sin(index * 0.9f)
+        (baseWidthPx * wave).coerceAtLeast(1f)
+    }
+    DrawTool.CALLIGRAPHY -> {
+        val angle = atan2(segmentEnd.y - segmentStart.y, segmentEnd.x - segmentStart.x)
+        val nibAngle = NIB_ANGLE_RADIANS
+        val factor = 0.35f + 0.9f * kotlin.math.abs(sin(angle - nibAngle))
+        (baseWidthPx * factor).coerceAtLeast(1f)
+    }
+    else -> baseWidthPx
+}
+
+private val NIB_ANGLE_RADIANS = Math.toRadians(45.0).toFloat()
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawShape(
     type: ShapeType,

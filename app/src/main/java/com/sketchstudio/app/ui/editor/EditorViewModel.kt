@@ -125,6 +125,19 @@ class EditorViewModel(
         _uiState.update { it?.copy(elements = it.elements.filterNot { e -> ids.contains(e.id) }) }
     }
 
+    fun clearAllElements() {
+        _uiState.update { it?.copy(elements = emptyList()) }
+    }
+
+    fun addCustomColor(color: Color) {
+        _uiState.update {
+            it?.copy(
+                currentColor = color,
+                customColors = (it.customColors + color).distinct().takeLast(12)
+            )
+        }
+    }
+
     fun updateActiveTab(tab: EditorTab) {
         _uiState.update { it?.copy(activeTab = tab) }
     }
