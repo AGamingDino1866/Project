@@ -66,7 +66,7 @@ fun FiltersPanel(state: EditorUiState, viewModel: EditorViewModel) {
             val interactionSource = remember { MutableInteractionSource() }
             LaunchedEffect(interactionSource) {
                 interactionSource.interactions.collect { interaction ->
-                    if (interaction is PressInteraction.Start) viewModel.beginEdit()
+                    if (interaction is PressInteraction.Press) viewModel.beginEdit()
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {

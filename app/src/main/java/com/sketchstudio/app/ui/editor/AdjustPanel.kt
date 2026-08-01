@@ -81,7 +81,7 @@ private fun AdjustRow(
 
     LaunchedEffect(interactionSource) {
         interactionSource.interactions.collect { interaction ->
-            if (interaction is PressInteraction.Start) onDragStart()
+            if (interaction is PressInteraction.Press) onDragStart()
         }
     }
 
