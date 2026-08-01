@@ -6,10 +6,13 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toArgb
 import com.sketchstudio.app.model.DrawTool
 import com.sketchstudio.app.model.MarkupElement
 import com.sketchstudio.app.model.ShapeType
+import com.sketchstudio.app.model.VariableWidthTools
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
@@ -41,22 +44,87 @@ object MarkupRenderer {
 
     private fun drawPathElement(canvas: Canvas, element: MarkupElement.PathElement, w: Float, h: Float) {
         if (element.points.size < 2) return
+        val mapped = element.points.map { Offset(it.x * w, it.y * h) }
+        val baseWidth = element.strokeWidthFraction * w
+
+        if (element.tool in VariableWidthTools) {
+            drawVariableWidthPath(canvas, mapped, element.color.toArgb(), element.alpha, baseWidth, element.tool)
+            return
+        }
+
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = element.color.toArgb()
             alpha = (element.alpha * 255).toInt().coerceIn(0, 255)
             style = Paint.Style.STROKE
-            strokeWidth = element.strokeWidthFraction * w
+            strokeWidth = baseWidth
             strokeCap = if (element.tool == DrawTool.MARKER) Paint.Cap.SQUARE else Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
         }
+        canvas.drawPath(smoothedPath(mapped), paint)
+    }
+
+    /** Mirrors MarkupCanvas's smoothedPath() exactly so export matches the live preview. */
+    private fun smoothedPath(mapped: List<Offset>): Path {
         val path = Path()
-        val first = element.points.first()
-        path.moveTo(first.x * w, first.y * h)
-        for (i in 1 until element.points.size) {
-            val p = element.points[i]
-            path.lineTo(p.x * w, p.y * h)
+        if (mapped.isEmpty()) return path
+        path.moveTo(mapped.first().x, mapped.first().y)
+        if (mapped.size < 3) {
+            for (i in 1 until mapped.size) path.lineTo(mapped[i].x, mapped[i].y)
+            return path
         }
-        canvas.drawPath(path, paint)
+        for (i in 1 until mapped.size - 1) {
+            val curr = mapped[i]
+            val next = mapped[i + 1]
+            path.quadTo(curr.x, curr.y, (curr.x + next.x) / 2f, (curr.y + next.y) / 2f)
+        }
+        val last = mapped.last()
+        path.lineTo(last.x, last.y)
+        return path
+    }
+
+    /** Mirrors MarkupCanvas's drawVariableWidthStroke()/variableSegmentWidth() exactly. */
+    private fun drawVariableWidthPath(
+        canvas: Canvas,
+        mapped: List<Offset>,
+        colorArgb: Int,
+        alpha: Float,
+        baseWidthPx: Float,
+        tool: DrawTool
+    ) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = colorArgb
+            this.alpha = (alpha * 255).toInt().coerceIn(0, 255)
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        for (i in 0 until mapped.size - 1) {
+            val a = mapped[i]
+            val b = mapped[i + 1]
+            paint.strokeWidth = variableSegmentWidth(tool, i, a, b, baseWidthPx)
+            canvas.drawLine(a.x, a.y, b.x, b.y, paint)
+        }
+    }
+
+    private val NIB_ANGLE_RADIANS = Math.toRadians(45.0).toFloat()
+
+    private fun variableSegmentWidth(
+        tool: DrawTool,
+        index: Int,
+        segmentStart: Offset,
+        segmentEnd: Offset,
+        baseWidthPx: Float
+    ): Float = when (tool) {
+        DrawTool.CRAYON -> {
+            val wave = 0.78f + 0.22f * sin(index * 0.9f)
+            (baseWidthPx * wave).coerceAtLeast(1f)
+        }
+        DrawTool.CALLIGRAPHY -> {
+            val angle = atan2(segmentEnd.y - segmentStart.y, segmentEnd.x - segmentStart.x)
+            val factor = 0.35f + 0.9f * abs(sin(angle - NIB_ANGLE_RADIANS))
+            (baseWidthPx * factor).coerceAtLeast(1f)
+        }
+        else -> baseWidthPx
     }
 
     private fun drawShapeElement(canvas: Canvas, element: MarkupElement.ShapeElement, w: Float, h: Float) {
