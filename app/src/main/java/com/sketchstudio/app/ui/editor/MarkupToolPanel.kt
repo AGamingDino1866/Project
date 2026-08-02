@@ -110,22 +110,41 @@ fun MarkupToolPanel(state: EditorUiState, viewModel: EditorViewModel) {
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                .background(palette.accent.copy(alpha = if (state.markupMode == MarkupMode.DRAW) 0.14f else 0f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { tap { showBrushPicker = true } }
+                .padding(vertical = 8.dp, horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            ToolIconButton(
-                icon = toolIcon(state.activeDrawTool),
-                label = brushLabel(state.activeDrawTool),
-                selected = state.markupMode == MarkupMode.DRAW,
-                onClick = { tap { showBrushPicker = true } }
+            Icon(
+                toolIcon(state.activeDrawTool),
+                contentDescription = null,
+                tint = if (state.markupMode == MarkupMode.DRAW) palette.accent else palette.label,
+                modifier = Modifier.size(22.dp)
+            )
+            Text(
+                brushLabel(state.activeDrawTool),
+                style = MaterialTheme.typography.labelLarge,
+                color = if (state.markupMode == MarkupMode.DRAW) palette.accent else palette.label,
+                modifier = Modifier.weight(1f).padding(start = 10.dp)
             )
             Icon(
                 Icons.Outlined.ExpandMore,
                 contentDescription = "Choose brush",
                 tint = palette.secondaryLabel,
-                modifier = Modifier.size(16.dp).padding(top = 2.dp)
+                modifier = Modifier.size(18.dp)
             )
-            Box(modifier = Modifier.weight(1f))
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
+        ) {
             ToolIconButton(
                 icon = Icons.Outlined.Delete,
                 selected = state.markupMode == MarkupMode.DRAW && state.activeDrawTool == DrawTool.ERASER,

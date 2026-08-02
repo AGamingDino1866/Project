@@ -6,15 +6,17 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Crop
 import androidx.compose.material.icons.outlined.Draw
@@ -43,12 +45,14 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.sketchstudio.app.model.EditorTab
+import com.sketchstudio.app.model.EditorUiState
 import com.sketchstudio.app.model.MarkupElement
 import com.sketchstudio.app.ui.components.GlassSurface
 import com.sketchstudio.app.ui.components.PillButton
@@ -56,6 +60,9 @@ import com.sketchstudio.app.ui.components.ToolIconButton
 import com.sketchstudio.app.util.BitmapTransforms
 import kotlinx.coroutines.launch
 import java.util.UUID
+
+private const val MIN_ZOOM = 1f
+private const val MAX_ZOOM = 6f
 
 @Composable
 fun EditorScreen(imageUri: Uri, onClose: () -> Unit) {
@@ -71,6 +78,8 @@ fun EditorScreen(imageUri: Uri, onClose: () -> Unit) {
     var pendingTextPosition by remember { mutableStateOf(Offset(0.5f, 0.5f)) }
     var textFieldValue by remember { mutableStateOf("") }
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    var zoomScale by remember(state?.baseBitmap) { mutableStateOf(1f) }
+    var zoomOffset by remember(state?.baseBitmap) { mutableStateOf(Offset.Zero) }
 
     val currentState = state
 
@@ -114,76 +123,101 @@ fun EditorScreen(imageUri: Uri, onClose: () -> Unit) {
                 }
             )
 
-            Box(
+            Row(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .onSizeChanged { containerSize = it }
             ) {
-                Image(
-                    bitmap = s.previewBitmap.asImageBitmap(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                if (containerSize.width > 0 && containerSize.height > 0) {
-                    val metrics = ImageDisplayMetrics(
-                        containerSize = Size(containerSize.width.toFloat(), containerSize.height.toFloat()),
-                        imageSize = Size(s.baseBitmap.width.toFloat(), s.baseBitmap.height.toFloat())
-                    )
-
-                    when (s.activeTab) {
-                        EditorTab.MARKUP -> MarkupCanvas(
-                            metrics = metrics,
-                            state = s,
-                            onBeginStroke = { viewModel.beginEdit() },
-                            onStrokeFinished = { element -> viewModel.addElement(element) },
-                            onElementsErased = { ids -> viewModel.removeElements(ids) },
-                            onTextPlace = { pos ->
-                                pendingTextPosition = pos
-                                textFieldValue = ""
-                                showTextDialog = true
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        EditorTab.CROP -> CropOverlay(
-                            metrics = metrics,
-                            cropRect = cropRect,
-                            onCropRectChange = { cropRect = it },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        else -> {}
-                    }
-                }
-            }
-
-            GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.navigationBarsPadding()) {
-                    Box(modifier = Modifier.padding(top = 10.dp).heightIn(max = 260.dp)) {
-                        when (s.activeTab) {
-                            EditorTab.ADJUST -> AdjustPanel(state = s, viewModel = viewModel)
-                            EditorTab.FILTERS -> FiltersPanel(state = s, viewModel = viewModel)
-                            EditorTab.CROP -> CropControlPanel(
-                                state = s,
-                                cropRect = cropRect,
-                                onCropRectChange = { cropRect = it },
-                                viewModel = viewModel,
-                                onApply = {
-                                    viewModel.beginEdit()
-                                    val cropped = BitmapTransforms.crop(s.baseBitmap, cropRect)
-                                    viewModel.applyCrop(cropped, cropRect)
-                                    cropRect = Rect(0.05f, 0.05f, 0.95f, 0.95f)
-                                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .onSizeChanged { containerSize = it }
+                        .twoFingerTransformGesture { centroid, pan, zoom ->
+                            val newScale = (zoomScale * zoom).coerceIn(MIN_ZOOM, MAX_ZOOM)
+                            val scaleFactor = newScale / zoomScale
+                            zoomOffset = (zoomOffset - centroid) * scaleFactor + centroid + pan
+                            zoomScale = newScale
+                        }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(
+                                scaleX = zoomScale,
+                                scaleY = zoomScale,
+                                translationX = zoomOffset.x,
+                                translationY = zoomOffset.y
                             )
-                            EditorTab.MARKUP -> MarkupToolPanel(state = s, viewModel = viewModel)
+                    ) {
+                        Image(
+                            bitmap = s.previewBitmap.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        if (containerSize.width > 0 && containerSize.height > 0) {
+                            val metrics = ImageDisplayMetrics(
+                                containerSize = Size(containerSize.width.toFloat(), containerSize.height.toFloat()),
+                                imageSize = Size(s.baseBitmap.width.toFloat(), s.baseBitmap.height.toFloat())
+                            )
+
+                            when (s.activeTab) {
+                                EditorTab.MARKUP -> MarkupCanvas(
+                                    metrics = metrics,
+                                    state = s,
+                                    onBeginStroke = { viewModel.beginEdit() },
+                                    onStrokeFinished = { element -> viewModel.addElement(element) },
+                                    onElementsErased = { ids -> viewModel.removeElements(ids) },
+                                    onTextPlace = { pos ->
+                                        pendingTextPosition = pos
+                                        textFieldValue = ""
+                                        showTextDialog = true
+                                    },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                EditorTab.CROP -> CropOverlay(
+                                    metrics = metrics,
+                                    cropRect = cropRect,
+                                    onCropRectChange = { cropRect = it },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                else -> {}
+                            }
                         }
                     }
-                    EditorMainTabRow(
-                        activeTab = s.activeTab,
-                        onSelect = { viewModel.updateActiveTab(it) }
-                    )
+
+                    if (zoomScale > 1.01f) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(16.dp)
+                        ) {
+                            PillButton(
+                                text = "Reset Zoom",
+                                onClick = {
+                                    zoomScale = 1f
+                                    zoomOffset = Offset.Zero
+                                }
+                            )
+                        }
+                    }
                 }
+
+                EditorSidePanel(
+                    state = s,
+                    viewModel = viewModel,
+                    cropRect = cropRect,
+                    onCropRectChange = { cropRect = it },
+                    onApplyCrop = {
+                        viewModel.beginEdit()
+                        val cropped = BitmapTransforms.crop(s.baseBitmap, cropRect)
+                        viewModel.applyCrop(cropped, cropRect)
+                        cropRect = Rect(0.05f, 0.05f, 0.95f, 0.95f)
+                    },
+                    modifier = Modifier.fillMaxHeight()
+                )
             }
         }
 
@@ -261,35 +295,82 @@ private fun EditorTopBar(
     }
 }
 
+/**
+ * Tool panel docked to the side (rather than a bottom sheet), so the photo
+ * keeps the full screen height — the layout tablets have room for and a
+ * bottom sheet would otherwise waste.
+ */
 @Composable
-private fun EditorMainTabRow(activeTab: EditorTab, onSelect: (EditorTab) -> Unit) {
+private fun EditorSidePanel(
+    state: EditorUiState,
+    viewModel: EditorViewModel,
+    cropRect: Rect,
+    onCropRectChange: (Rect) -> Unit,
+    onApplyCrop: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    BoxWithConstraints(modifier = modifier) {
+        val panelWidth = (maxWidth * 0.42f).coerceIn(220.dp, 300.dp)
+        GlassSurface(modifier = Modifier.width(panelWidth).fillMaxHeight()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+            ) {
+                EditorSideTabRow(
+                    activeTab = state.activeTab,
+                    onSelect = { viewModel.updateActiveTab(it) }
+                )
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                ) {
+                    when (state.activeTab) {
+                        EditorTab.ADJUST -> AdjustPanel(state = state, viewModel = viewModel)
+                        EditorTab.FILTERS -> FiltersPanel(state = state, viewModel = viewModel)
+                        EditorTab.CROP -> CropControlPanel(
+                            state = state,
+                            cropRect = cropRect,
+                            onCropRectChange = onCropRectChange,
+                            viewModel = viewModel,
+                            onApply = onApplyCrop
+                        )
+                        EditorTab.MARKUP -> MarkupToolPanel(state = state, viewModel = viewModel)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditorSideTabRow(activeTab: EditorTab, onSelect: (EditorTab) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = 4.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
         ToolIconButton(
             icon = Icons.Outlined.Tune,
-            label = "Adjust",
             selected = activeTab == EditorTab.ADJUST,
             onClick = { onSelect(EditorTab.ADJUST) }
         )
         ToolIconButton(
             icon = Icons.Outlined.PhotoFilter,
-            label = "Filters",
             selected = activeTab == EditorTab.FILTERS,
             onClick = { onSelect(EditorTab.FILTERS) }
         )
         ToolIconButton(
             icon = Icons.Outlined.Crop,
-            label = "Crop",
             selected = activeTab == EditorTab.CROP,
             onClick = { onSelect(EditorTab.CROP) }
         )
         ToolIconButton(
             icon = Icons.Outlined.Draw,
-            label = "Markup",
             selected = activeTab == EditorTab.MARKUP,
             onClick = { onSelect(EditorTab.MARKUP) }
         )
