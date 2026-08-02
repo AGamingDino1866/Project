@@ -14,11 +14,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawStyle
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -27,11 +31,14 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.sp
+import com.sketchstudio.app.model.BrushFamily
 import com.sketchstudio.app.model.DrawTool
 import com.sketchstudio.app.model.EditorUiState
 import com.sketchstudio.app.model.MarkupElement
 import com.sketchstudio.app.model.MarkupMode
 import com.sketchstudio.app.model.ShapeType
+import com.sketchstudio.app.model.family
+import com.sketchstudio.app.util.BrushMath
 import java.util.UUID
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -194,6 +201,7 @@ private fun strokeAlphaFor(tool: DrawTool): Float = when (tool) {
     DrawTool.MARKER -> 0.45f
     DrawTool.PENCIL -> 0.85f
     DrawTool.CRAYON -> 0.8f
+    DrawTool.CHALK -> 0.7f
     else -> 1f
 }
 
@@ -271,23 +279,28 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokePath(
     alpha: Float,
     tool: DrawTool
 ) {
-    if (points.isEmpty()) return
+    if (points.size < 2) return
     val strokeWidthPx = (strokeWidthFraction * metrics.displayedSize.width).coerceAtLeast(1f)
-
-    if (tool in com.sketchstudio.app.model.VariableWidthTools) {
-        drawVariableWidthStroke(points, metrics, color, strokeWidthPx, alpha, tool)
-        return
-    }
-
     val mapped = points.map { metrics.toContainerLocal(it) }
-    val path = smoothedPath(mapped)
-    val cap = if (tool == DrawTool.MARKER) StrokeCap.Square else StrokeCap.Round
-    drawPath(
-        path = path,
-        color = color,
-        alpha = alpha,
-        style = Stroke(width = strokeWidthPx, cap = cap, join = StrokeJoin.Round)
-    )
+
+    when (tool.family()) {
+        BrushFamily.VARIABLE_WIDTH -> drawVariableWidthStroke(mapped, color, strokeWidthPx, alpha, tool)
+        BrushFamily.GLOW -> drawGlowStroke(mapped, color, strokeWidthPx, alpha)
+        BrushFamily.RAINBOW -> drawRainbowStroke(mapped, strokeWidthPx, alpha)
+        BrushFamily.DASHED -> drawDashedStroke(mapped, color, strokeWidthPx, alpha)
+        BrushFamily.STAMP -> drawStampStroke(mapped, color, strokeWidthPx, alpha, tool)
+        BrushFamily.SOFT_DABS -> drawSoftDabStroke(mapped, color, strokeWidthPx, alpha, tool)
+        BrushFamily.CONSTANT -> {
+            val path = smoothedPath(mapped)
+            val cap = if (tool == DrawTool.MARKER) StrokeCap.Square else StrokeCap.Round
+            drawPath(
+                path = path,
+                color = color,
+                alpha = alpha,
+                style = Stroke(width = strokeWidthPx, cap = cap, join = StrokeJoin.Round)
+            )
+        }
+    }
 }
 
 /** Builds a smoothed path through midpoints (quadratic bezier), reducing the jagged look of raw finger-drag points. */
@@ -312,66 +325,140 @@ private fun smoothedPath(mapped: List<Offset>): Path {
 }
 
 /**
- * Renders a stroke whose width varies along its length, used for the
- * textured Crayon brush and the chisel-nib Calligraphy brush. Rendered as a
- * sequence of per-segment lines rather than one continuous Path, since
- * Compose can't vary a Stroke's width partway through a path. The width
- * formula is purely deterministic (index/direction based, no randomness) so
- * the exported bitmap matches this preview exactly.
+ * Renders a stroke whose width varies along its length (Crayon, Chalk,
+ * Calligraphy, Ribbon, Ink). Drawn as a sequence of per-segment lines rather
+ * than one continuous Path, since Compose can't vary a Stroke's width
+ * partway through a path. All width math lives in BrushMath so this always
+ * matches the exported bitmap exactly.
  */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawVariableWidthStroke(
-    points: List<Offset>,
-    metrics: ImageDisplayMetrics,
+    mapped: List<Offset>,
     color: Color,
-    baseStrokeWidthPx: Float,
+    baseWidthPx: Float,
     alpha: Float,
     tool: DrawTool
 ) {
-    if (points.size < 2) return
-    val mapped = points.map { metrics.toContainerLocal(it) }
     for (i in 0 until mapped.size - 1) {
         val a = mapped[i]
         val b = mapped[i + 1]
-        val segWidth = variableSegmentWidth(tool, i, a, b, baseStrokeWidthPx)
+        val segWidth = BrushMath.variableSegmentWidth(tool, i, a, b, baseWidthPx)
+        val segAlpha = (alpha * BrushMath.segmentAlphaFactor(tool, i)).coerceIn(0f, 1f)
+        drawLine(color = color, start = a, end = b, strokeWidth = segWidth, cap = StrokeCap.Round, alpha = segAlpha)
+    }
+}
+
+/** Neon: a soft wide glow underlay plus a bright, near-white core line. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawGlowStroke(
+    mapped: List<Offset>,
+    color: Color,
+    baseWidthPx: Float,
+    alpha: Float
+) {
+    val path = smoothedPath(mapped)
+    drawPath(path, color = color, alpha = alpha * 0.3f, style = Stroke(width = baseWidthPx * 3.2f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    drawPath(path, color = color, alpha = alpha * 0.55f, style = Stroke(width = baseWidthPx * 1.8f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    val core = lerp(color, Color.White, 0.55f)
+    drawPath(path, color = core, alpha = alpha, style = Stroke(width = (baseWidthPx * 0.5f).coerceAtLeast(1f), cap = StrokeCap.Round, join = StrokeJoin.Round))
+}
+
+/** Rainbow: each segment's hue advances deterministically along the stroke. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawRainbowStroke(
+    mapped: List<Offset>,
+    baseWidthPx: Float,
+    alpha: Float
+) {
+    for (i in 0 until mapped.size - 1) {
         drawLine(
-            color = color,
-            start = a,
-            end = b,
-            strokeWidth = segWidth,
+            color = Color.hsv(BrushMath.rainbowHueAt(i), 0.85f, 0.95f),
+            start = mapped[i],
+            end = mapped[i + 1],
+            strokeWidth = baseWidthPx,
             cap = StrokeCap.Round,
             alpha = alpha
         )
     }
 }
 
-/**
- * Deterministic per-segment stroke width for the variable-width brushes.
- * CRAYON: a gentle index-based wave for a slightly uneven, waxy line.
- * CALLIGRAPHY: width follows this segment's direction relative to a fixed
- * 45-degree nib angle, like a chisel-tip pen — thin when moving parallel to
- * the nib edge, thick when moving across it.
- */
-private fun variableSegmentWidth(
-    tool: DrawTool,
-    index: Int,
-    segmentStart: Offset,
-    segmentEnd: Offset,
-    baseWidthPx: Float
-): Float = when (tool) {
-    DrawTool.CRAYON -> {
-        val wave = 0.78f + 0.22f * sin(index * 0.9f)
-        (baseWidthPx * wave).coerceAtLeast(1f)
-    }
-    DrawTool.CALLIGRAPHY -> {
-        val angle = atan2(segmentEnd.y - segmentStart.y, segmentEnd.x - segmentStart.x)
-        val nibAngle = NIB_ANGLE_RADIANS
-        val factor = 0.35f + 0.9f * kotlin.math.abs(sin(angle - nibAngle))
-        (baseWidthPx * factor).coerceAtLeast(1f)
-    }
-    else -> baseWidthPx
+/** Dashed: a smoothed path with a native dash-pattern PathEffect. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDashedStroke(
+    mapped: List<Offset>,
+    color: Color,
+    baseWidthPx: Float,
+    alpha: Float
+) {
+    val dashLen = (baseWidthPx * 2.2f).coerceAtLeast(6f)
+    val gapLen = (baseWidthPx * 1.6f).coerceAtLeast(5f)
+    drawPath(
+        path = smoothedPath(mapped),
+        color = color,
+        alpha = alpha,
+        style = Stroke(
+            width = baseWidthPx,
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(dashLen, gapLen), 0f)
+        )
+    )
 }
 
-private val NIB_ANGLE_RADIANS = Math.toRadians(45.0).toFloat()
+/** Star Stamp / Confetti: a shape repeated at evenly-spaced points along the path. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStampStroke(
+    mapped: List<Offset>,
+    color: Color,
+    baseWidthPx: Float,
+    alpha: Float,
+    tool: DrawTool
+) {
+    val spacing = BrushMath.stampSpacing(tool, baseWidthPx)
+    val size = BrushMath.stampSize(tool, baseWidthPx)
+    val samples = BrushMath.sampleAlongPath(mapped, spacing)
+    for (sample in samples) {
+        val rotationRadians = BrushMath.stampRotation(sample.index)
+        when (tool) {
+            DrawTool.STAR -> {
+                val polygon = BrushMath.starPolygon(sample.position, size, size * 0.45f, rotationRadians)
+                val starPath = Path().apply {
+                    moveTo(polygon.first().x, polygon.first().y)
+                    for (p in polygon.drop(1)) lineTo(p.x, p.y)
+                    close()
+                }
+                drawPath(starPath, color = color, alpha = alpha)
+            }
+            DrawTool.CONFETTI -> {
+                val hsv = FloatArray(3)
+                android.graphics.Color.colorToHSV(color.toArgb(), hsv)
+                val shiftedHue = (hsv[0] + BrushMath.confettiHueShift(sample.index)) % 360f
+                val dabColor = Color.hsv(shiftedHue, hsv[1].coerceAtLeast(0.55f), hsv[2].coerceAtLeast(0.65f))
+                rotate(degrees = Math.toDegrees(rotationRadians.toDouble()).toFloat(), pivot = sample.position) {
+                    drawRect(
+                        color = dabColor,
+                        topLeft = Offset(sample.position.x - size / 2f, sample.position.y - size / 2f),
+                        size = androidx.compose.ui.geometry.Size(size, size),
+                        alpha = alpha
+                    )
+                }
+            }
+            else -> Unit
+        }
+    }
+}
+
+/** Airbrush / Watercolor: many soft, low-alpha circular dabs along the path. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSoftDabStroke(
+    mapped: List<Offset>,
+    color: Color,
+    baseWidthPx: Float,
+    alpha: Float,
+    tool: DrawTool
+) {
+    val spacing = BrushMath.dabSpacing(tool, baseWidthPx)
+    val samples = BrushMath.sampleAlongPath(mapped, spacing)
+    for (sample in samples) {
+        val radius = BrushMath.dabRadius(tool, baseWidthPx, sample.index)
+        val dabAlpha = (alpha * BrushMath.dabAlphaFactor(tool, sample.index)).coerceIn(0f, 1f)
+        drawCircle(color = color, radius = radius, center = sample.position, alpha = dabAlpha)
+    }
+}
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawShape(
     type: ShapeType,

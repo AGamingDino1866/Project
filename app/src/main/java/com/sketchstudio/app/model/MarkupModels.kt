@@ -4,11 +4,47 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 
 enum class DrawTool {
-    PEN, MARKER, PENCIL, CRAYON, CALLIGRAPHY, ERASER
+    PEN, INK, PENCIL,
+    MARKER, WATERCOLOR, AIRBRUSH,
+    CRAYON, CHALK,
+    CALLIGRAPHY, RIBBON,
+    NEON, RAINBOW, DASHED, STAR, CONFETTI,
+    ERASER
 }
 
-/** Brushes whose stroke width varies along its length rather than staying constant. */
-val VariableWidthTools = setOf(DrawTool.CRAYON, DrawTool.CALLIGRAPHY)
+/** Groups brushes by how they're rendered, so MarkupCanvas/MarkupRenderer can dispatch on one thing. */
+enum class BrushFamily { CONSTANT, VARIABLE_WIDTH, GLOW, RAINBOW, DASHED, STAMP, SOFT_DABS }
+
+fun DrawTool.family(): BrushFamily = when (this) {
+    DrawTool.PEN, DrawTool.MARKER, DrawTool.PENCIL -> BrushFamily.CONSTANT
+    DrawTool.CRAYON, DrawTool.CHALK, DrawTool.CALLIGRAPHY, DrawTool.RIBBON, DrawTool.INK -> BrushFamily.VARIABLE_WIDTH
+    DrawTool.NEON -> BrushFamily.GLOW
+    DrawTool.RAINBOW -> BrushFamily.RAINBOW
+    DrawTool.DASHED -> BrushFamily.DASHED
+    DrawTool.STAR, DrawTool.CONFETTI -> BrushFamily.STAMP
+    DrawTool.WATERCOLOR, DrawTool.AIRBRUSH -> BrushFamily.SOFT_DABS
+    DrawTool.ERASER -> BrushFamily.CONSTANT
+}
+
+data class BrushInfo(val tool: DrawTool, val label: String, val category: String)
+
+val BrushCatalog: List<BrushInfo> = listOf(
+    BrushInfo(DrawTool.PEN, "Pen", "Precision"),
+    BrushInfo(DrawTool.INK, "Ink", "Precision"),
+    BrushInfo(DrawTool.PENCIL, "Pencil", "Precision"),
+    BrushInfo(DrawTool.MARKER, "Marker", "Painterly"),
+    BrushInfo(DrawTool.WATERCOLOR, "Watercolor", "Painterly"),
+    BrushInfo(DrawTool.AIRBRUSH, "Airbrush", "Painterly"),
+    BrushInfo(DrawTool.CRAYON, "Crayon", "Textured"),
+    BrushInfo(DrawTool.CHALK, "Chalk", "Textured"),
+    BrushInfo(DrawTool.CALLIGRAPHY, "Calligraphy", "Calligraphy"),
+    BrushInfo(DrawTool.RIBBON, "Ribbon", "Calligraphy"),
+    BrushInfo(DrawTool.NEON, "Neon", "Fun & Decorative"),
+    BrushInfo(DrawTool.RAINBOW, "Rainbow", "Fun & Decorative"),
+    BrushInfo(DrawTool.DASHED, "Dashed", "Fun & Decorative"),
+    BrushInfo(DrawTool.STAR, "Star Stamp", "Fun & Decorative"),
+    BrushInfo(DrawTool.CONFETTI, "Confetti", "Fun & Decorative")
+)
 
 enum class ShapeType {
     LINE, ARROW, RECTANGLE, OVAL

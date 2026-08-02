@@ -17,18 +17,28 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.BlurOn
 import androidx.compose.material.icons.outlined.Brush
 import androidx.compose.material.icons.outlined.Create
 import androidx.compose.material.icons.outlined.CropSquare
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Draw
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.FlashOn
+import androidx.compose.material.icons.outlined.Grain
 import androidx.compose.material.icons.outlined.HorizontalRule
 import androidx.compose.material.icons.outlined.LineWeight
+import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Opacity
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PanoramaFishEye
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Texture
+import androidx.compose.material.icons.outlined.Waves
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -64,10 +74,6 @@ private val MarkupPalette = listOf(
     Color(0xFFFF2D55)
 )
 
-private val DrawToolsRow = listOf(
-    DrawTool.PEN, DrawTool.MARKER, DrawTool.PENCIL, DrawTool.CRAYON, DrawTool.CALLIGRAPHY, DrawTool.ERASER
-)
-
 @Composable
 fun MarkupToolPanel(state: EditorUiState, viewModel: EditorViewModel) {
     val palette = LocalIosPalette.current
@@ -79,6 +85,7 @@ fun MarkupToolPanel(state: EditorUiState, viewModel: EditorViewModel) {
 
     var showColorPicker by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
+    var showBrushPicker by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -102,28 +109,38 @@ fun MarkupToolPanel(state: EditorUiState, viewModel: EditorViewModel) {
             }
         }
 
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            items(DrawToolsRow) { tool ->
-                ToolIconButton(
-                    icon = toolIcon(tool),
-                    selected = state.markupMode == MarkupMode.DRAW && state.activeDrawTool == tool,
-                    onClick = { tap { viewModel.updateDrawTool(tool) } }
-                )
-            }
-            item {
-                ToolIconButton(
-                    icon = shapeIcon(state.activeShapeType),
-                    selected = state.markupMode == MarkupMode.SHAPE,
-                    onClick = { tap { viewModel.updateMarkupMode(MarkupMode.SHAPE) } }
-                )
-            }
-            item {
-                ToolIconButton(
-                    icon = Icons.Outlined.TextFields,
-                    selected = state.markupMode == MarkupMode.TEXT,
-                    onClick = { tap { viewModel.updateMarkupMode(MarkupMode.TEXT) } }
-                )
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            ToolIconButton(
+                icon = toolIcon(state.activeDrawTool),
+                label = brushLabel(state.activeDrawTool),
+                selected = state.markupMode == MarkupMode.DRAW,
+                onClick = { tap { showBrushPicker = true } }
+            )
+            Icon(
+                Icons.Outlined.ExpandMore,
+                contentDescription = "Choose brush",
+                tint = palette.secondaryLabel,
+                modifier = Modifier.size(16.dp).padding(top = 2.dp)
+            )
+            Box(modifier = Modifier.weight(1f))
+            ToolIconButton(
+                icon = Icons.Outlined.Delete,
+                selected = state.markupMode == MarkupMode.DRAW && state.activeDrawTool == DrawTool.ERASER,
+                onClick = { tap { viewModel.updateDrawTool(DrawTool.ERASER) } }
+            )
+            ToolIconButton(
+                icon = shapeIcon(state.activeShapeType),
+                selected = state.markupMode == MarkupMode.SHAPE,
+                onClick = { tap { viewModel.updateMarkupMode(MarkupMode.SHAPE) } }
+            )
+            ToolIconButton(
+                icon = Icons.Outlined.TextFields,
+                selected = state.markupMode == MarkupMode.TEXT,
+                onClick = { tap { viewModel.updateMarkupMode(MarkupMode.TEXT) } }
+            )
         }
 
         if (state.markupMode == MarkupMode.SHAPE) {
@@ -197,6 +214,17 @@ fun MarkupToolPanel(state: EditorUiState, viewModel: EditorViewModel) {
         }
     }
 
+    if (showBrushPicker) {
+        BrushPickerDialog(
+            selectedTool = state.activeDrawTool,
+            onSelect = { tool ->
+                tap { viewModel.updateDrawTool(tool) }
+                showBrushPicker = false
+            },
+            onDismiss = { showBrushPicker = false }
+        )
+    }
+
     if (showColorPicker) {
         ColorPickerDialog(
             initialColor = state.currentColor,
@@ -248,13 +276,42 @@ private fun BrushSizePreview(strokeWidthFraction: Float, color: Color) {
     }
 }
 
-private fun toolIcon(tool: DrawTool): ImageVector = when (tool) {
+fun toolIcon(tool: DrawTool): ImageVector = when (tool) {
     DrawTool.PEN -> Icons.Outlined.Edit
-    DrawTool.MARKER -> Icons.Outlined.Brush
+    DrawTool.INK -> Icons.Outlined.Draw
     DrawTool.PENCIL -> Icons.Outlined.Create
+    DrawTool.MARKER -> Icons.Outlined.Brush
+    DrawTool.WATERCOLOR -> Icons.Outlined.Opacity
+    DrawTool.AIRBRUSH -> Icons.Outlined.BlurOn
     DrawTool.CRAYON -> Icons.Outlined.Texture
+    DrawTool.CHALK -> Icons.Outlined.Grain
     DrawTool.CALLIGRAPHY -> Icons.Outlined.LineWeight
+    DrawTool.RIBBON -> Icons.Outlined.Waves
+    DrawTool.NEON -> Icons.Outlined.FlashOn
+    DrawTool.RAINBOW -> Icons.Outlined.Palette
+    DrawTool.DASHED -> Icons.Outlined.MoreHoriz
+    DrawTool.STAR -> Icons.Outlined.Star
+    DrawTool.CONFETTI -> Icons.Outlined.AutoAwesome
     DrawTool.ERASER -> Icons.Outlined.Delete
+}
+
+private fun brushLabel(tool: DrawTool): String = when (tool) {
+    DrawTool.PEN -> "Pen"
+    DrawTool.INK -> "Ink"
+    DrawTool.PENCIL -> "Pencil"
+    DrawTool.MARKER -> "Marker"
+    DrawTool.WATERCOLOR -> "Watercolor"
+    DrawTool.AIRBRUSH -> "Airbrush"
+    DrawTool.CRAYON -> "Crayon"
+    DrawTool.CHALK -> "Chalk"
+    DrawTool.CALLIGRAPHY -> "Calligraphy"
+    DrawTool.RIBBON -> "Ribbon"
+    DrawTool.NEON -> "Neon"
+    DrawTool.RAINBOW -> "Rainbow"
+    DrawTool.DASHED -> "Dashed"
+    DrawTool.STAR -> "Star Stamp"
+    DrawTool.CONFETTI -> "Confetti"
+    DrawTool.ERASER -> "Eraser"
 }
 
 private fun shapeIcon(type: ShapeType): ImageVector = when (type) {
